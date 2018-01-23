@@ -797,7 +797,7 @@ class RecurrentDecoder(Decoder):
         """
         # (1) RNN step
         # concat previous word embedding and previous hidden state
-        rnn_input = mx.sym.concat(word_vec_prev, state.hidden, dim=1,
+        rnn_input = mx.sym.concat(word_vec_prev, attention_state.context, dim=1,
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
         # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
         # next_layer_states: num_layers * [batch_size, rnn_num_hidden]
