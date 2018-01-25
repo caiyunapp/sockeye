@@ -66,7 +66,7 @@ def load_version(fname: str) -> str:
     """
     if not os.path.exists(fname):
         logger.warning("No version file found. Defaulting to 1.0.3")
-        return "1.0.3"
+        return "1.16.4"
     with open(fname) as inp:
         return inp.read().strip()
 

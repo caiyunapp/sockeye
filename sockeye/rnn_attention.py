@@ -174,7 +174,12 @@ class Attention(object):
         dynamic_source = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1), axis=2)
         # dynamic_source: (batch_size, source_seq_len, num_hidden_dynamic_source)
         dynamic_source = mx.sym.broadcast_to(dynamic_source, shape=(0, source_seq_len, self.dynamic_source_num_hidden))
-        return AttentionState(context=None, probs=None, dynamic_source=dynamic_source)
+        
+        context = mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1)
+        # context: (batch_size, rnn_num_hidden)
+        context = mx.sym.broadcast_to(context, shape=(0, 512))
+
+        return AttentionState(context=context, probs=None, dynamic_source=dynamic_source)
 
     def make_input(self,
                    seq_idx: int,
