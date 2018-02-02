@@ -102,31 +102,35 @@ class ResidualCellParallelInput(mx.rnn.ResidualCell):
     for the residual connection itself.
     """
     def __init__(self, base_cell, normal_ind=1):
-        self.normal_ind = normal_ind
+        self.in_normal = sqrt(self.normal_ind)
         super(ResidualCellParallelInput, self).__init__(base_cell)
 
     def __call__(self, inputs, parallel_inputs, states):
-        normal_inputs = inputs / sqrt(self.normal_ind)
+        normal_inputs = inputs / self.in_normal
         concat_inputs = mx.sym.concat(normal_inputs, parallel_inputs)
         output, states = self.base_cell(concat_inputs, states)
         output = mx.symbol.elemwise_add(output, inputs, name="%s_plus_residual" % output.name)
         return output, states
 
 
-class SqrtNormalLstm(mx.rnn.ModifierCell):
+class SqrtNormalLstm(mx.rnn.ResidualCell):
     """
     A modifier cell that accepts two input vectors and concatenates them before
     calling the original cell. Typically it is used for concatenating the
     normal and the parallel input in a stacked rnn.
     """
-    def __init__(self, base_cell, normal_ind=1):
-        self.normal_ind = normal_ind
+    def __init__(self, base_cell, normal_ind=1, out_norm=False):
+        self.in_normal = sqrt(self.normal_ind)
         super(SqrtNormalLstm, self).__init__(base_cell)
+        self.out_normal = 1
+        if out_norm:
+            self.out_normal = sqrt(normal_ind+1)
 
     def __call__(self, inputs, states):
-        normal_inputs = inputs / sqrt(self.normal_ind)
+        normal_inputs = inputs / self.in_normal
         output, states = self.base_cell(normal_inputs, states)
         output = mx.symbol.elemwise_add(output, inputs, name="%s_plus_residual" % output.name)
+        output = output / self.out_normal
         return output, states
 
 
@@ -147,6 +151,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
     if not layers:
         layers = range(config.num_layers)
+
+    layers = list(layers)
+    last_layer = layers[-1]
+
     for layer_idx in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
@@ -178,10 +186,11 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
-            norm_idx = layer_idx + 3 - config.first_residual_layer
+            norm_idx = layer_idx + 2 - config.first_residual_layer
             if norm_idx <= 0:
                 norm_idx = 1
-            cell = SqrtNormalLstm(cell, norm_idx) if not parallel_inputs else ResidualCellParallelInput(cell, norm_idx)
+            is_last_layer = (is_last_layer==layer_idx)
+            cell = SqrtNormalLstm(cell, norm_idx, is_last_layer) if not parallel_inputs else ResidualCellParallelInput(cell, norm_idx)
         elif parallel_inputs:
             cell = ParallelInputCell(cell)
 
