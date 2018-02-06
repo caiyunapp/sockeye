@@ -486,10 +486,13 @@ class RecurrentDecoder(Decoder):
                                   "output dimensions do not match.")
 
         # Stacked RNN
+        print("HYY_DEBUG", "IN Decoder")
         if self.rnn_config.num_layers == 1 or not self.config.attention_in_upper_layers:
+            print("HYY_DEBUG", "Only pre")
             self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
             self.rnn_post_attention = None
         else:
+            print("HYY_DEBUG", "Pre & post")
             self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False,
                                                          layers=[0])
             self.rnn_post_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True,

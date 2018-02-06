@@ -102,7 +102,7 @@ class ResidualCellParallelInput(mx.rnn.ResidualCell):
     for the residual connection itself.
     """
     def __init__(self, base_cell, normal_ind=1):
-        self.in_normal = sqrt(self.normal_ind)
+        self.in_normal = sqrt(normal_ind)
         super(ResidualCellParallelInput, self).__init__(base_cell)
 
     def __call__(self, inputs, parallel_inputs, states):
@@ -120,7 +120,7 @@ class SqrtNormalLstm(mx.rnn.ResidualCell):
     normal and the parallel input in a stacked rnn.
     """
     def __init__(self, base_cell, normal_ind=1, out_norm=False):
-        self.in_normal = sqrt(self.normal_ind)
+        self.in_normal = sqrt(normal_ind)
         super(SqrtNormalLstm, self).__init__(base_cell)
         self.out_normal = 1
         if out_norm:
@@ -189,10 +189,14 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
             norm_idx = layer_idx + 2 - config.first_residual_layer
             if norm_idx <= 0:
                 norm_idx = 1
-            is_last_layer = (is_last_layer==layer_idx)
+            is_last_layer = (last_layer==layer_idx)
+            print("HYY_DEBUG", layer_idx, norm_idx, is_last_layer, parallel_inputs, config.first_residual_layer)
             cell = SqrtNormalLstm(cell, norm_idx, is_last_layer) if not parallel_inputs else ResidualCellParallelInput(cell, norm_idx)
         elif parallel_inputs:
             cell = ParallelInputCell(cell)
+            print("HYY_DEBUG\tparallel", layer_idx, str(type(cell)))
+        else:
+            print("HYY_DEBUG\telse", layer_idx, str(type(cell)))
 
         rnn.add(cell)
 

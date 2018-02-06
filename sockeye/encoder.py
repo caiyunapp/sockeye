@@ -116,9 +116,11 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                               "Residual connections on the first encoder layer are not supported")
 
     # One layer bi-directional RNN:
+    print("HYY_DEBUG", 'Begin BiDirectionalRNNEncoder')    
     encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
+    print("HYY_DEBUG", 'End BiDirectionalRNNEncoder')
 
     if config.rnn_config.num_layers > 1:
         # Stacked uni-directional RNN:
@@ -604,6 +606,7 @@ class RecurrentEncoder(Encoder):
                  layout: str = C.TIME_MAJOR) -> None:
         self.rnn_config = rnn_config
         self.layout = layout
+        print("HYY_DEBUG", "IN Encoder", str(type(self)))
         self.rnn = rnn.get_stacked_rnn(rnn_config, prefix)
 
     def encode(self,
