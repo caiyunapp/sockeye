@@ -549,7 +549,7 @@ class RecurrentDecoder(Decoder):
         # get recurrent attention function conditioned on source
         attention_func = self.attention.on(source_encoded, source_encoded_lengths,
                                            source_encoded_max_length)
-        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length)
+        attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length, self.config.rnn_config.num_hidden)
 
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)

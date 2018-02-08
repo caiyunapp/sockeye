@@ -164,7 +164,7 @@ class Attention(object):
 
         return attend
 
-    def get_initial_state(self, source_length: mx.sym.Symbol, source_seq_len: int) -> AttentionState:
+    def get_initial_state(self, source_length: mx.sym.Symbol, source_seq_len: int, hidden: int = 1) -> AttentionState:
         """
         Returns initial attention state. Dynamic source encoding is initialized with zeros.
 
@@ -177,7 +177,7 @@ class Attention(object):
         
         context = mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1)
         # context: (batch_size, rnn_num_hidden)
-        context = mx.sym.broadcast_to(context, shape=(0, 512))
+        context = mx.sym.broadcast_to(context, shape=(0, hidden))
 
         return AttentionState(context=context, probs=None, dynamic_source=dynamic_source)
 
