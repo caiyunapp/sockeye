@@ -551,6 +551,10 @@ class RecurrentDecoder(Decoder):
                                            source_encoded_max_length)
         attention_state = self.attention.get_initial_state(source_encoded_lengths, source_encoded_max_length, self.config.rnn_config.num_hidden)
 
+        # encode_
+        source_encode_res = mx.sym.split(data=source_encoded, num_outputs=2, axis=0)
+        source_encoded = source_encode_res[0]
+
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)
         # layer_states: List[(batch_size, state_num_hidden]

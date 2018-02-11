@@ -174,7 +174,7 @@ class Attention(object):
         dynamic_source = mx.sym.expand_dims(mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1), axis=2)
         # dynamic_source: (batch_size, source_seq_len, num_hidden_dynamic_source)
         dynamic_source = mx.sym.broadcast_to(dynamic_source, shape=(0, source_seq_len, self.dynamic_source_num_hidden))
-        
+
         context = mx.sym.expand_dims(mx.sym.zeros_like(source_length), axis=1)
         # context: (batch_size, rnn_num_hidden)
         context = mx.sym.broadcast_to(context, shape=(0, hidden))
@@ -616,8 +616,11 @@ class MlpAttention(Attention):
 
         coverage_func = self.coverage.on(source, source_length, source_seq_len) if self.coverage else None
 
+        source_pair = mx.sym.split(data=source, num_outputs=2, axis=0)
+        source_key, source_value = source_pair[0], source_pair[1]
+
         # (batch_size, seq_len, attention_num_hidden)
-        source_hidden = mx.sym.FullyConnected(data=source,
+        source_hidden = mx.sym.FullyConnected(data=source_key,
                                               weight=self.att_e2h_weight,
                                               num_hidden=self.attention_num_hidden,
                                               no_bias=True,
@@ -677,7 +680,7 @@ class MlpAttention(Attention):
                                                      flatten=False,
                                                      name="%sraw_att_score_fc" % self.prefix)
 
-            context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores)
+            context, attention_probs = get_context_and_attention_probs(source_value, source_length, attention_scores)
 
             dynamic_source = att_state.dynamic_source
             if self.coverage:
