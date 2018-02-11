@@ -153,6 +153,10 @@ def test_residual_cell_parallel_input():
     parallel_cell = rnn.ResidualCellParallelInput(inner_rnn_cell)
     parallel_cell_output, _ = parallel_cell(inp, parallel_input, states)
 
+    inner_rnn_cell_1 = mx.rnn.RNNCell(num_hidden, params=params)
+    double_out_cell = rnn.DoubleOutResidualCell(inner_rnn_cell_1)
+    double_out_cell_output, _ = double_out_cell(inp, states)
+
     input_nd = mx.nd.random_uniform(shape=input_shape)
     states_nd = mx.nd.random_uniform(shape=states_shape)
     parallel_nd = mx.nd.random_uniform(shape=parallel_shape)
@@ -173,6 +177,20 @@ def test_residual_cell_parallel_input():
                                              parallel=parallel_nd,
                                              **params_nd)[0]
 
+    # 为新的cell订制参数
+    arg_shapes, _, _ = double_out_cell_output.infer_shape(input=input_shape, states=states_shape)
+    params_with_shapes = filter(lambda a: a[0].startswith("params_"),
+                                [x for x in zip(double_out_cell_output.list_arguments(), arg_shapes)]
+                                )
+    params_nd = {}
+    for name, shape in params_with_shapes:
+        params_nd[name] = mx.nd.random_uniform(shape=shape)
+
+    out_double_out = double_out_cell_output.eval(input=input_nd,
+                                             states=states_nd,
+                                             **params_nd)[0]
+
+    assert out_double_out.shape == (batch_size*2, num_hidden)
     assert np.isclose(out_default_residual.asnumpy(), out_parallel.asnumpy()).all()
 
 def test_sequential_rnn_cell_parallel_input():
