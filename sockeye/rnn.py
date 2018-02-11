@@ -108,6 +108,41 @@ class ResidualCellParallelInput(mx.rnn.ResidualCell):
         return output, states
 
 
+class DoubleOutResidualCell(mx.rnn.ResidualCell):
+    """
+        Parameters
+    ----------
+    base_cell : BaseRNNCell
+        Cell on whose outputs to add residual connection.
+    """
+    def __init__(self, base_cell):
+        super(DoubleOutResidualCell, self).__init__(base_cell)
+
+    def unroll(self, length, inputs, begin_state=None, layout='NTC', merge_outputs=None):
+        self.reset()
+
+        self.base_cell._modified = False
+        outputs, states = self.base_cell.unroll(length, inputs=inputs, begin_state=begin_state,
+                                                layout=layout, merge_outputs=merge_outputs)
+        self.base_cell._modified = True
+
+        merge_outputs = isinstance(outputs, symbol.Symbol) if merge_outputs is None else \
+                        merge_outputs
+
+        outputs_unres = mx.sym.identity(outputs)
+        inputs, _ = mx.rnn.rnn_cell._normalize_sequence(length, inputs, layout, merge_outputs)
+        if merge_outputs:
+            outputs = mx.symbol.elemwise_add(outputs, inputs, name="%s_plus_residual" % outputs.name)
+        else:
+            outputs = [mx.symbol.elemwise_add(output_sym, input_sym,
+                                           name="%s_plus_residual" % output_sym.name)
+                       for output_sym, input_sym in zip(outputs, inputs)]
+
+        outputs = mx.symbol.concat(outputs, outputs_unres, dim=1)
+
+        return outputs, states
+
+
 def get_stacked_rnn(config: RNNConfig, prefix: str,
                     parallel_inputs: bool = False,
                     layers: Optional[Iterable[int]] = None) -> mx.rnn.SequentialRNNCell:
@@ -125,6 +160,10 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
     rnn = mx.rnn.SequentialRNNCell() if not parallel_inputs else SequentialRNNCellParallelInput()
     if not layers:
         layers = range(config.num_layers)
+
+    layers = list(layers)
+    last_layer = layers[-1]
+
     for layer_idx in layers:
         # fhieber: the 'l' in the prefix does NOT stand for 'layer' but for the direction 'l' as in mx.rnn.rnn_cell::517
         # this ensures parameter name compatibility of training w/ FusedRNN and decoding with 'unfused' RNN.
@@ -156,7 +195,14 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
 
         # layer_idx is 0 based, whereas first_residual_layer is 1-based
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
-            cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
+            is_last_layer = (last_layer==layer_idx)
+
+            if is_last_layer and (not parallel_inputs):
+                print("HYY_DEBUG:HIT DOUBLE OUTPUT CELL")
+                cell = DoubleOutResidualCell(cell)
+            else:
+                cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
+            # cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)
         elif parallel_inputs:
             cell = ParallelInputCell(cell)
 
