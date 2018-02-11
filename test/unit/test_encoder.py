@@ -16,6 +16,7 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.encoder
+from sockeye.rnn import RNNConfig
 
 
 _BATCH_SIZE = 8
@@ -89,4 +90,61 @@ def test_sincos_positional_embeddings():
     nd_encoded_positions = encoded_positions.eval(positions=mx.nd.arange(0, _SEQ_LEN),
                                                   data=mx.nd.zeros((_SEQ_LEN, _NUM_EMBED)))[0]
     assert np.isclose(nd_encoded.asnumpy(), nd_encoded_positions.asnumpy()).all()
+
+
+def test_sincos_positional_embeddings():
+    # Test that .encode() and .encode_positions() return the same values:
+    data = mx.sym.Variable("data")
+    positions = mx.sym.Variable("positions")
+    pos_encoder = sockeye.encoder.AddSinCosPositionalEmbeddings(num_embed=_NUM_EMBED,
+                                                                scale_up_input=False,
+                                                                scale_down_positions=False,
+                                                                prefix="test")
+    encoded, _, __ = pos_encoder.encode(data, None, _SEQ_LEN)
+    nd_encoded = encoded.eval(data=mx.nd.zeros((_BATCH_SIZE, _SEQ_LEN, _NUM_EMBED)))[0]
+    # Take the first element in the batch to get (seq_len, num_embed)
+    nd_encoded = nd_encoded[0]
+
+    encoded_positions = pos_encoder.encode_positions(positions, data)
+    # Explicitly encode all positions from 0 to _SEQ_LEN
+    nd_encoded_positions = encoded_positions.eval(positions=mx.nd.arange(0, _SEQ_LEN),
+                                                  data=mx.nd.zeros((_SEQ_LEN, _NUM_EMBED)))[0]
+    assert np.isclose(nd_encoded.asnumpy(), nd_encoded_positions.asnumpy()).all()
+
+
+def test_recurrent_encoder():
+    _BATCH_SIZE = 8
+    _SEQ_LEN = 10
+    _NUM_EMBED = 16
+
+    source_embed = mx.sym.Variable("data")
+
+    config = RNNConfig(
+        cell_type='lstm',
+        num_hidden=_NUM_EMBED,
+        num_layers=4,
+        dropout_inputs=0.0,
+        dropout_states=0.0,
+        dropout_recurrent=0,
+        residual=True,
+        first_residual_layer=2,
+        forget_bias=0.0)
+
+    encoder = sockeye.encoder.RecurrentEncoder(config)
+
+    encoded, _, _ = encoder.encode(source_embed, None, _SEQ_LEN)
+
+    arg_shapes, _, _ = encoded.infer_shape(data=(_SEQ_LEN, _BATCH_SIZE, _NUM_EMBED))
+    params_with_shapes = filter(lambda a: a[0].startswith("encoder_"),
+                                [x for x in zip(encoded.list_arguments(), arg_shapes)])
+
+    params_nd = {}
+    for name, shape in params_with_shapes:
+        params_nd[name] = mx.nd.random_uniform(shape=shape)
+
+    nd_encoded = encoded.eval(data=mx.nd.zeros((_SEQ_LEN, _BATCH_SIZE, _NUM_EMBED)), **params_nd)[0]
+    nd_encoded = nd_encoded[0]
+
+    print(nd_encoded.shape)
+    raise Exception
 
