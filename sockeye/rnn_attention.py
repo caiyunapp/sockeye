@@ -617,7 +617,7 @@ class MlpAttention(Attention):
         coverage_func = self.coverage.on(source, source_length, source_seq_len) if self.coverage else None
 
         source_pair = mx.sym.split(data=source, num_outputs=2, axis=0)
-        source_key, source_value = source_pair[0], source_pair[1]
+        source_value, source_key = source_pair[0], source_pair[1]
 
         # (batch_size, seq_len, attention_num_hidden)
         source_hidden = mx.sym.FullyConnected(data=source_key,
