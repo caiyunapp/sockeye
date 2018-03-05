@@ -129,7 +129,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
     #                                      prefix=C.STACKEDRNN_PREFIX,
     #                                      layout=C.TIME_MAJOR))
 
-    encoders.append(RecurrentEncoder(rnn_config=config.rnn_config,
+    encoders.append(BiDirectionalFullRNNEncoder(rnn_config=config.rnn_config,
                                      prefix=C.STACKEDRNN_PREFIX,
                                      layout=C.TIME_MAJOR))
 
@@ -637,6 +637,89 @@ class RecurrentEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.rnn_config.num_hidden
+
+
+class BiDirectionalFullRNNEncoder(Encoder):
+    """
+    An encoder that runs a forward and a reverse RNN over input data.
+    States from both RNNs are concatenated together.
+
+    :param rnn_config: RNN configuration.
+    :param prefix: Prefix.
+    :param layout: Data layout.
+    :param encoder_class: Recurrent encoder class to use.
+    """
+
+    def __init__(self,
+                 rnn_config: rnn.RNNConfig,
+                 prefix=C.BIDIRECTIONALRNN_PREFIX,
+                 layout=C.TIME_MAJOR,
+                 encoder_class: Callable = RecurrentEncoder) -> None:
+        self.rnn_config = rnn_config
+        self.internal_rnn_config = rnn_config
+        if layout[0] == 'N':
+            logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
+
+        # time-major layout as _encode needs to swap layout for SequenceReverse
+        self.forward_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.FORWARD_PREFIX,
+                                         layout=C.TIME_MAJOR)
+        self.reverse_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.REVERSE_PREFIX,
+                                         layout=C.TIME_MAJOR)
+        self.layout = layout
+        self.prefix = prefix
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        if self.layout[0] == 'N':
+            data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        data = self._encode(data, data_length, seq_len)
+        if self.layout[0] == 'N':
+            data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        return data, data_length, seq_len
+
+    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+        """
+        Bidirectionally encodes time-major data.
+        """
+        # (seq_len, batch_size, num_embed)
+        data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
+                                              use_sequence_length=True)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_reverse = mx.sym.SequenceReverse(data=hidden_reverse)
+        # (seq_length, batch, 2 * cell_num_hidden)
+        hidden_concat = hidden_forward + hidden_reverse
+
+        return hidden_concat
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.rnn_config.num_hidden
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this encoder.
+        """
+        return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+
 
 
 class BiDirectionalRNNEncoder(Encoder):
