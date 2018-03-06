@@ -116,7 +116,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                               "Residual connections on the first encoder layer are not supported")
 
     # One layer bi-directional RNN:
-    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
+    # encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
+    #                                         prefix=C.BIDIRECTIONALRNN_PREFIX,
+    #                                         layout=C.TIME_MAJOR))
+    encoders.append(RecurrentEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
 
@@ -125,13 +128,13 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        # encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-        #                                  prefix=C.STACKEDRNN_PREFIX,
-        #                                  layout=C.TIME_MAJOR))
-        # print("HYY_DEBUG", remaining_rnn_config)
-        encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
+        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
                                          prefix=C.STACKEDRNN_PREFIX,
                                          layout=C.TIME_MAJOR))
+
+        # encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
+        #                                  prefix=C.STACKEDRNN_PREFIX,
+        #                                  layout=C.TIME_MAJOR))
 
     encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
@@ -553,6 +556,12 @@ class EncoderSequence(Encoder):
 
     def __init__(self, encoders: List[Encoder]) -> None:
         self.encoders = encoders
+        self.final_hiddens = []
+        self.init_ws = []
+        self.init_bs = []
+        for state_idx in range(12):
+            self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % ("HYYTEST", state_idx)))
+            self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % ("HYYTEST", state_idx)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -568,6 +577,11 @@ class EncoderSequence(Encoder):
         """
         for encoder in self.encoders:
             data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
+            # if hasattr(encoder, "states"):
+            if type(encoder) is not RecurrentEncoder:
+                continue
+            self.final_hiddens.extend(encoder.get_states())
+
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -591,6 +605,26 @@ class EncoderSequence(Encoder):
         max_seq_len = min((encoder.get_max_seq_len()
                            for encoder in self.encoders if encoder.get_max_seq_len() is not None), default=None)
         return max_seq_len
+
+    def get_final_hiddens(self) -> list:
+        """
+        Returns final hiddens of all layers.
+        """
+        result = []
+        print("HYY_DEBUG", len(self.final_hiddens))
+
+        for state_idx, h in enumerate(self.final_hiddens[:12]):
+            print("HYY_DEBUG", state_idx)
+            init = mx.sym.FullyConnected(data=h,
+                                         num_hidden=512,
+                                         weight=self.init_ws[state_idx],
+                                         bias=self.init_bs[state_idx],
+                                         name="%senc2decinit_%d" % ("HYYTEST", state_idx))
+
+            result.append(init)
+
+        self.final_hiddens = []
+        return result
 
 
 class RecurrentEncoder(Encoder):
@@ -622,7 +656,8 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        outputs, states = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        self.states = states
 
         return outputs, data_length, seq_len
 
@@ -637,6 +672,9 @@ class RecurrentEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.rnn_config.num_hidden
+
+    def get_states(self):
+        return self.states
 
 
 class BiDirectionalFullRNNEncoder(Encoder):
@@ -697,7 +735,7 @@ class BiDirectionalFullRNNEncoder(Encoder):
         data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
                                               use_sequence_length=True)
         # (seq_length, batch, cell_num_hidden)
-        hidden_forward, _, _ = self.forward_rnn.encode(data, data_length, seq_len)
+        hidden_forward, *_, _ = self.forward_rnn.encode(data, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
         hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
         # (seq_length, batch, cell_num_hidden)
@@ -719,7 +757,15 @@ class BiDirectionalFullRNNEncoder(Encoder):
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
-
+    def get_final_state(self) -> list:
+        if self.forward_rnn and self.reverse_rnn:
+            forward_states = self.forward_rnn.get_states()
+            backward_states = self.reverse_rnn.get_states()
+            final_h = forward_states[0] + backward_states[0]
+            final_c = forward_states[1] + backward_states[1]
+            return [final_h, final_c]
+        else:
+            return []
 
 
 class BiDirectionalRNNEncoder(Encoder):
