@@ -138,10 +138,12 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
+            source_states = self.encoder.get_final_hiddens()
+
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
             target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
-                                                          target_embed, target_embed_length, target_embed_seq_len)
+                                                          target_embed, target_embed_length, target_embed_seq_len, source_states)
 
             # target_decoded: (batch_size * target_seq_len, rnn_num_hidden)
             target_decoded = mx.sym.reshape(data=target_decoded, shape=(-3, 0))
