@@ -116,10 +116,7 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
                               "Residual connections on the first encoder layer are not supported")
 
     # One layer bi-directional RNN:
-    # encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
-    #                                         prefix=C.BIDIRECTIONALRNN_PREFIX,
-    #                                         layout=C.TIME_MAJOR))
-    encoders.append(RecurrentEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
+    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
                                             prefix=C.BIDIRECTIONALRNN_PREFIX,
                                             layout=C.TIME_MAJOR))
 
@@ -128,13 +125,10 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
         remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
                                                       first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
+
+        encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
                                          prefix=C.STACKEDRNN_PREFIX,
                                          layout=C.TIME_MAJOR))
-
-        # encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
-        #                                  prefix=C.STACKEDRNN_PREFIX,
-        #                                  layout=C.TIME_MAJOR))
 
     encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
@@ -578,9 +572,9 @@ class EncoderSequence(Encoder):
         for encoder in self.encoders:
             data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
             # if hasattr(encoder, "states"):
-            if type(encoder) is not RecurrentEncoder:
-                continue
-            self.final_hiddens.extend(encoder.get_states())
+            if type(encoder) in (RecurrentEncoder, BiDirectionalRNNEncoder, BiDirectionalFullRNNEncoder):
+                state = encoder.get_states()
+                self.final_hiddens.extend(state)
 
         return data, data_length, seq_len
 
@@ -613,8 +607,7 @@ class EncoderSequence(Encoder):
         result = []
         print("HYY_DEBUG", len(self.final_hiddens))
 
-        for state_idx, h in enumerate(self.final_hiddens[:12]):
-            print("HYY_DEBUG", state_idx)
+        for state_idx, h in enumerate(self.final_hiddens):
             init = mx.sym.FullyConnected(data=h,
                                          num_hidden=512,
                                          weight=self.init_ws[state_idx],
@@ -757,15 +750,13 @@ class BiDirectionalFullRNNEncoder(Encoder):
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
 
-    def get_final_state(self) -> list:
-        if self.forward_rnn and self.reverse_rnn:
-            forward_states = self.forward_rnn.get_states()
-            backward_states = self.reverse_rnn.get_states()
-            final_h = forward_states[0] + backward_states[0]
-            final_c = forward_states[1] + backward_states[1]
-            return [final_h, final_c]
-        else:
-            return []
+    def get_states(self):
+        forward_state = self.forward_rnn.get_states()
+        backward_state = self.reverse_rnn.get_states()
+        state = []
+        for f,b in zip(forward_state, backward_state):
+            state.append(f + b)
+        return state
 
 
 class BiDirectionalRNNEncoder(Encoder):
@@ -850,6 +841,16 @@ class BiDirectionalRNNEncoder(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+    def get_states(self):
+        forward_state = self.forward_rnn.get_states()
+        backward_state = self.reverse_rnn.get_states()
+        state = []
+        for f,b in zip(forward_state, backward_state):
+            state.append(mx.sym.concat(f, b, dim=1, name='bidirectional_state'))
+        return state
+
+        return states
 
 
 class ConvolutionalEncoder(Encoder):
