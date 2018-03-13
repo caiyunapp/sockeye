@@ -605,7 +605,7 @@ class EncoderSequence(Encoder):
         Returns final hiddens of all layers.
         """
         result = []
-        print("HYY_DEBUG", len(self.final_hiddens))
+        # print("HYY_DEBUG", len(self.final_hiddens))
 
         for state_idx, h in enumerate(self.final_hiddens):
             init = mx.sym.FullyConnected(data=h,

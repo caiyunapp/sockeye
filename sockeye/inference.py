@@ -171,10 +171,13 @@ class InferenceModel(model.SockeyeModel):
                                                            source_embed_length,
                                                            source_embed_seq_len)
 
+            source_states = self.encoder.get_final_hiddens()
+
             # initial decoder states
             decoder_init_states = self.decoder.init_states(source_encoded,
                                                            source_encoded_length,
-                                                           source_encoded_seq_len)
+                                                           source_encoded_seq_len,
+                                                           source_states)
 
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
