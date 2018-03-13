@@ -1146,7 +1146,8 @@ class ConvolutionalDecoder(Decoder):
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int,
+                    source_states: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
