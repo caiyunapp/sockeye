@@ -481,7 +481,7 @@ class RecurrentDecoder(Decoder):
             self.mapped_context_w = mx.sym.Variable("%smapped_context_weight" % prefix)
             self.mapped_context_b = mx.sym.Variable("%smapped_context_bias" % prefix)
         if self.rnn_config.residual:
-            utils.check_condition(self.config.rnn_config.first_residual_layer >= 2,
+            utils.check_condition(self.config.rnn_config.first_residual_layer >= 1,
                                   "Residual connections on the first decoder layer are not supported as input and "
                                   "output dimensions do not match.")
 

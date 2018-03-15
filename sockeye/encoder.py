@@ -112,22 +112,26 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
         encoders.append(ReverseSequence(num_hidden=encoders[-1].get_num_hidden()))
 
     if config.rnn_config.residual:
-        utils.check_condition(config.rnn_config.first_residual_layer >= 2,
+        utils.check_condition(config.rnn_config.first_residual_layer >= 1,
                               "Residual connections on the first encoder layer are not supported")
 
-    # One layer bi-directional RNN:
-    encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
-                                            prefix=C.BIDIRECTIONALRNN_PREFIX,
-                                            layout=C.TIME_MAJOR))
+    # # One layer bi-directional RNN:
+    # encoders.append(BiDirectionalRNNEncoder(rnn_config=config.rnn_config.copy(num_layers=1),
+    #                                         prefix=C.BIDIRECTIONALRNN_PREFIX,
+    #                                         layout=C.TIME_MAJOR))
 
-    if config.rnn_config.num_layers > 1:
-        # Stacked uni-directional RNN:
-        # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
-        remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
-                                                      first_residual_layer=config.rnn_config.first_residual_layer - 1)
-        encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
-                                         prefix=C.STACKEDRNN_PREFIX,
-                                         layout=C.TIME_MAJOR))
+    # if config.rnn_config.num_layers > 1:
+    #     # Stacked uni-directional RNN:
+    #     # Because we already have a one layer bi-rnn we reduce the num_layers as well as the first_residual_layer.
+    #     remaining_rnn_config = config.rnn_config.copy(num_layers=config.rnn_config.num_layers - 1,
+    #                                                   first_residual_layer=config.rnn_config.first_residual_layer - 1)
+    #     encoders.append(RecurrentEncoder(rnn_config=remaining_rnn_config,
+    #                                      prefix=C.STACKEDRNN_PREFIX,
+    #                                      layout=C.TIME_MAJOR))
+
+    encoders.append(RecurrentEncoder(rnn_config=config.rnn_config,
+                                     prefix=C.STACKEDRNN_PREFIX,
+                                     layout=C.TIME_MAJOR))
 
     encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
 
