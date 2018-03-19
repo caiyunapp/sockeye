@@ -197,8 +197,8 @@ def get_stacked_rnn(config: RNNConfig, prefix: str,
         if config.residual and layer_idx + 1 >= config.first_residual_layer:
             is_last_layer = (last_layer==layer_idx)
 
-            if is_last_layer and (not parallel_inputs):
-                print("HYY_DEBUG:HIT DOUBLE OUTPUT CELL")
+            if is_last_layer and (not parallel_inputs) and getattr(config, "double_out", False):
+                print("HYY_DEBUG:HIT DOUBLE OUTPUT CELL.")
                 cell = DoubleOutResidualCell(cell)
             else:
                 cell = mx.rnn.ResidualCell(cell) if not parallel_inputs else ResidualCellParallelInput(cell)

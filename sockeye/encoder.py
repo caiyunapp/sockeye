@@ -129,8 +129,29 @@ def get_recurrent_encoder(config: RecurrentEncoderConfig) -> 'Encoder':
     #                                      prefix=C.STACKEDRNN_PREFIX,
     #                                      layout=C.TIME_MAJOR))
 
-    encoders.append(BiDirectionalFullRNNEncoder(rnn_config=config.rnn_config,
-                                     prefix=C.STACKEDRNN_PREFIX,
+    # encoders.append(BiDirectionalFullRNNEncoder(rnn_config=config.rnn_config,
+    #                                  prefix=C.STACKEDRNN_PREFIX,
+    #                                  layout=C.TIME_MAJOR))
+
+    for i in range(config.rnn_config.num_layers - 1):
+        if config.rnn_config.first_residual_layer <= i + 1:
+            first_residual = 0
+        else:
+            first_residual = config.rnn_config.first_residual_layer
+
+        remaining_rnn_config = config.rnn_config.copy(num_layers=1,
+                                                      first_residual_layer=first_residual)
+
+        encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
+                                         prefix=C.STACKEDRNN_PREFIX + "_%d" % (i+1),
+                                         layout=C.TIME_MAJOR))
+
+    remaining_rnn_config = config.rnn_config.copy(num_layers=1,
+                                                  first_residual_layer=0,
+                                                  double_out=True)
+
+    encoders.append(BiDirectionalFullRNNEncoder(rnn_config=remaining_rnn_config,
+                                     prefix=C.STACKEDRNN_PREFIX + "_m1",
                                      layout=C.TIME_MAJOR))
 
     encoders.append(ConvertLayout(C.BATCH_MAJOR, encoders[-1].get_num_hidden()))
@@ -608,6 +629,10 @@ class RecurrentEncoder(Encoder):
                  layout: str = C.TIME_MAJOR) -> None:
         self.rnn_config = rnn_config
         self.layout = layout
+        double_out = False
+        if hasattr(rnn_config, "double_out"):
+            double_out = True
+            print("HYY_DEBUG double_out HIT")
         self.rnn = rnn.get_stacked_rnn(rnn_config, prefix)
 
     def encode(self,
