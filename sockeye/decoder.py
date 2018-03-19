@@ -487,10 +487,10 @@ class RecurrentDecoder(Decoder):
 
         # Stacked RNN
         if self.rnn_config.num_layers == 1 or not self.config.attention_in_upper_layers:
-            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False)
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True)
             self.rnn_post_attention = None
         else:
-            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=False,
+            self.rnn_pre_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True,
                                                          layers=[0])
             self.rnn_post_attention = rnn.get_stacked_rnn(self.rnn_config, self.prefix, parallel_inputs=True,
                                                           layers=range(1, self.rnn_config.num_layers))
@@ -805,8 +805,11 @@ class RecurrentDecoder(Decoder):
                                   name="%sconcat_target_context_t%d" % (self.prefix, seq_idx))
         # rnn_pre_attention_output: (batch_size, rnn_num_hidden)
         # next_layer_states: num_layers * [batch_size, rnn_num_hidden]
+        # rnn_pre_attention_output, rnn_pre_attention_layer_states = \
+        #     self.rnn_pre_attention(rnn_input, state.layer_states[:self.rnn_pre_attention_n_states])
+
         rnn_pre_attention_output, rnn_pre_attention_layer_states = \
-            self.rnn_pre_attention(rnn_input, state.layer_states[:self.rnn_pre_attention_n_states])
+            self.rnn_pre_attention(word_vec_prev, attention_state.context, state.layer_states[:self.rnn_pre_attention_n_states])
 
         # (2) Attention step
         attention_input = self.attention.make_input(seq_idx, word_vec_prev, rnn_pre_attention_output)
