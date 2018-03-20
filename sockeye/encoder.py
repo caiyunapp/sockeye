@@ -574,6 +574,12 @@ class EncoderSequence(Encoder):
 
     def __init__(self, encoders: List[Encoder]) -> None:
         self.encoders = encoders
+        self.final_hiddens = []
+        self.init_ws = []
+        self.init_bs = []
+        for state_idx in range(12):
+            self.init_ws.append(mx.sym.Variable("%senc2decinit_%d_weight" % ("HYYTEST", state_idx)))
+            self.init_bs.append(mx.sym.Variable("%senc2decinit_%d_bias" % ("HYYTEST", state_idx)))
 
     def encode(self,
                data: mx.sym.Symbol,
@@ -589,6 +595,11 @@ class EncoderSequence(Encoder):
         """
         for encoder in self.encoders:
             data, data_length, seq_len = encoder.encode(data, data_length, seq_len)
+            # if hasattr(encoder, "states"):
+            if type(encoder) in (RecurrentEncoder, BiDirectionalRNNEncoder, BiDirectionalFullRNNEncoder):
+                state = encoder.get_states()
+                self.final_hiddens.extend(state)
+
         return data, data_length, seq_len
 
     def get_num_hidden(self) -> int:
@@ -612,6 +623,19 @@ class EncoderSequence(Encoder):
         max_seq_len = min((encoder.get_max_seq_len()
                            for encoder in self.encoders if encoder.get_max_seq_len() is not None), default=None)
         return max_seq_len
+
+    def get_final_hiddens(self) -> list:
+        """
+        Returns final hiddens of all layers.
+        """
+        result = []
+        # print("HYY_DEBUG", len(self.final_hiddens))
+
+        for state_idx, h in enumerate(self.final_hiddens):
+            result.append(h)
+
+        self.final_hiddens = []
+        return result
 
 
 class RecurrentEncoder(Encoder):
@@ -647,7 +671,8 @@ class RecurrentEncoder(Encoder):
         :param seq_len: Maximum sequence length.
         :return: Encoded versions of input data (data, data_length, seq_len).
         """
-        outputs, _ = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        outputs, states = self.rnn.unroll(seq_len, inputs=data, merge_outputs=True, layout=self.layout)
+        self.states = states
 
         return outputs, data_length, seq_len
 
@@ -662,6 +687,98 @@ class RecurrentEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.rnn_config.num_hidden
+
+    def get_states(self):
+        return self.states
+
+
+class BiDirectionalFullRNNEncoder(Encoder):
+    """
+    An encoder that runs a forward and a reverse RNN over input data.
+    States from both RNNs are concatenated together.
+
+    :param rnn_config: RNN configuration.
+    :param prefix: Prefix.
+    :param layout: Data layout.
+    :param encoder_class: Recurrent encoder class to use.
+    """
+
+    def __init__(self,
+                 rnn_config: rnn.RNNConfig,
+                 prefix=C.BIDIRECTIONALRNN_PREFIX,
+                 layout=C.TIME_MAJOR,
+                 encoder_class: Callable = RecurrentEncoder) -> None:
+        self.rnn_config = rnn_config
+        self.internal_rnn_config = rnn_config
+        if layout[0] == 'N':
+            logger.warning("Batch-major layout for encoder input. Consider using time-major layout for faster speed")
+
+        # time-major layout as _encode needs to swap layout for SequenceReverse
+        self.forward_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.FORWARD_PREFIX,
+                                         layout=C.TIME_MAJOR)
+        self.reverse_rnn = encoder_class(rnn_config=self.internal_rnn_config,
+                                         prefix=prefix + C.REVERSE_PREFIX,
+                                         layout=C.TIME_MAJOR)
+        self.layout = layout
+        self.prefix = prefix
+
+    def encode(self,
+               data: mx.sym.Symbol,
+               data_length: mx.sym.Symbol,
+               seq_len: int) -> Tuple[mx.sym.Symbol, mx.sym.Symbol, int]:
+        """
+        Encodes data given sequence lengths of individual examples and maximum sequence length.
+
+        :param data: Input data.
+        :param data_length: Vector with sequence lengths.
+        :param seq_len: Maximum sequence length.
+        :return: Encoded versions of input data (data, data_length, seq_len).
+        """
+        if self.layout[0] == 'N':
+            data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        data = self._encode(data, data_length, seq_len)
+        if self.layout[0] == 'N':
+            data = mx.sym.swapaxes(data=data, dim1=0, dim2=1)
+        return data, data_length, seq_len
+
+    def _encode(self, data: mx.sym.Symbol, data_length: mx.sym.Symbol, seq_len: int) -> mx.sym.Symbol:
+        """
+        Bidirectionally encodes time-major data.
+        """
+        # (seq_len, batch_size, num_embed)
+        data_reverse = mx.sym.SequenceReverse(data=data, sequence_length=data_length,
+                                              use_sequence_length=True)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_forward, *_, _ = self.forward_rnn.encode(data, data_length, seq_len)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_reverse, _, _ = self.reverse_rnn.encode(data_reverse, data_length, seq_len)
+        # (seq_length, batch, cell_num_hidden)
+        hidden_reverse = mx.sym.SequenceReverse(data=hidden_reverse)
+        # (seq_length, batch, 2 * cell_num_hidden)
+        hidden_concat = hidden_forward + hidden_reverse
+
+        return hidden_concat
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.rnn_config.num_hidden
+
+    def get_rnn_cells(self) -> List[mx.rnn.BaseRNNCell]:
+        """
+        Returns a list of RNNCells used by this encoder.
+        """
+        return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+    def get_states(self):
+        forward_state = self.forward_rnn.get_states()
+        backward_state = self.reverse_rnn.get_states()
+        state = []
+        for f,b in zip(forward_state, backward_state):
+            state.append(f + b)
+        return state
 
 
 class BiDirectionalFullRNNEncoder(Encoder):
@@ -829,6 +946,16 @@ class BiDirectionalRNNEncoder(Encoder):
         Returns a list of RNNCells used by this encoder.
         """
         return self.forward_rnn.get_rnn_cells() + self.reverse_rnn.get_rnn_cells()
+
+    def get_states(self):
+        forward_state = self.forward_rnn.get_states()
+        backward_state = self.reverse_rnn.get_states()
+        state = []
+        for f,b in zip(forward_state, backward_state):
+            state.append(mx.sym.concat(f, b, dim=1, name='bidirectional_state'))
+        return state
+
+        return states
 
 
 class ConvolutionalEncoder(Encoder):

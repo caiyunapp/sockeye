@@ -529,7 +529,8 @@ class RecurrentDecoder(Decoder):
                         source_encoded_max_length: int,
                         target_embed: mx.sym.Symbol,
                         target_embed_lengths: mx.sym.Symbol,
-                        target_embed_max_length: int) -> mx.sym.Symbol:
+                        target_embed_max_length: int,
+                        source_states: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -558,7 +559,7 @@ class RecurrentDecoder(Decoder):
         # initialize decoder states
         # hidden: (batch_size, rnn_num_hidden)
         # layer_states: List[(batch_size, state_num_hidden]
-        state = self.get_initial_state(source_encoded, source_encoded_lengths)
+        state = self.get_initial_state(source_encoded, source_encoded_lengths, source_states)
 
         # hidden_all: target_seq_len * (batch_size, 1, rnn_num_hidden)
         hidden_all = []
@@ -718,7 +719,8 @@ class RecurrentDecoder(Decoder):
 
     def get_initial_state(self,
                           source_encoded: mx.sym.Symbol,
-                          source_encoded_length: mx.sym.Symbol) -> RecurrentDecoderState:
+                          source_encoded_length: mx.sym.Symbol,
+                          source_states: mx.sym.Symbol) -> RecurrentDecoderState:
         """
         Computes initial states of the decoder, hidden state, and one for each RNN layer.
         Optionally, init states for RNN layers are computed using 1 non-linear FC
@@ -755,30 +757,34 @@ class RecurrentDecoder(Decoder):
         hidden = mx.sym.tile(data=zeros, reps=(1, self.num_hidden))
 
         # initial states for each layer
-        layer_states = []
-        for state_idx, (_, init_num_hidden) in enumerate(sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])):
-            if self.config.state_init == C.RNN_DEC_INIT_ZERO:
-                init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
-            else:
-                if self.config.state_init == C.RNN_DEC_INIT_LAST:
-                    init = source_encoded_last
-                elif self.config.state_init == C.RNN_DEC_INIT_AVG:
-                    # (batch_size, encoder_num_hidden)
-                    init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=0, keepdims=False),
-                                                mx.sym.expand_dims(source_encoded_length, axis=1))
-                else:
-                    raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
 
-                init = mx.sym.FullyConnected(data=init,
-                                             num_hidden=init_num_hidden,
-                                             weight=self.init_ws[state_idx],
-                                             bias=self.init_bs[state_idx],
-                                             name="%senc2decinit_%d" % (self.prefix, state_idx))
-                if self.config.layer_normalization:
-                    init = self.init_norms[state_idx].normalize(init)
-                init = mx.sym.Activation(data=init, act_type="tanh",
-                                         name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
-            layer_states.append(init)
+        layer_states = source_states
+
+        # layer_states = []
+
+        # for state_idx, (_, init_num_hidden) in enumerate(sum([rnn.state_shape for rnn in self.get_rnn_cells()], [])):
+        #     if self.config.state_init == C.RNN_DEC_INIT_ZERO:
+        #         init = mx.sym.tile(data=zeros, reps=(1, init_num_hidden))
+        #     else:
+        #         if self.config.state_init == C.RNN_DEC_INIT_LAST:
+        #             init = source_encoded_last
+        #         elif self.config.state_init == C.RNN_DEC_INIT_AVG:
+        #             # (batch_size, encoder_num_hidden)
+        #             init = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=0, keepdims=False),
+        #                                         mx.sym.expand_dims(source_encoded_length, axis=1))
+        #         else:
+        #             raise ValueError("Unknown decoder state init type '%s'" % self.config.state_init)
+
+        #         init = mx.sym.FullyConnected(data=init,
+        #                                      num_hidden=init_num_hidden,
+        #                                      weight=self.init_ws[state_idx],
+        #                                      bias=self.init_bs[state_idx],
+        #                                      name="%senc2decinit_%d" % (self.prefix, state_idx))
+        #         if self.config.layer_normalization:
+        #             init = self.init_norms[state_idx].normalize(init)
+        #         init = mx.sym.Activation(data=init, act_type="tanh",
+        #                                  name="%senc2dec_inittanh_%d" % (self.prefix, state_idx))
+        #     layer_states.append(init)
 
         return RecurrentDecoderState(hidden, layer_states)
 
@@ -1143,7 +1149,8 @@ class ConvolutionalDecoder(Decoder):
     def init_states(self,
                     source_encoded: mx.sym.Symbol,
                     source_encoded_lengths: mx.sym.Symbol,
-                    source_encoded_max_length: int) -> List[mx.sym.Symbol]:
+                    source_encoded_max_length: int,
+                    source_states: mx.sym.Symbol) -> List[mx.sym.Symbol]:
         """
         Returns a list of symbolic states that represent the initial states of this decoder.
         Used for inference.
